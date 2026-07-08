@@ -156,7 +156,7 @@ async function fetchRestCatalog(token: string, fileKey: string): Promise<RestCat
   post({
     type: "log",
     level: "info",
-    message: `Catalogue ${fileKey} : ${allComponents.length} composants (${resolvedPrefixCount} rattachés à un component set), ${stylesRes.meta?.styles?.length ?? 0} styles.`,
+    message: `Catalog ${fileKey}: ${allComponents.length} components (${resolvedPrefixCount} attached to a component set), ${stylesRes.meta?.styles?.length ?? 0} styles.`,
   });
 
   return catalog;
@@ -270,9 +270,9 @@ function componentFullName(main: ComponentNode): string {
 }
 
 function describeScope(scope: SwapScope, roots: readonly SceneNode[]): string {
-  if (scope === "page") return `Toute la page "${figma.currentPage.name}"`;
-  if (roots.length === 1) return `Sélection : "${roots[0].name}"`;
-  return `Sélection : ${roots.length} éléments`;
+  if (scope === "page") return `Whole page "${figma.currentPage.name}"`;
+  if (roots.length === 1) return `Selection: "${roots[0].name}"`;
+  return `Selection: ${roots.length} elements`;
 }
 
 // ---------------------------------------------------------------------------
@@ -413,7 +413,7 @@ async function processNodeVariables(
       }
       if (Object.keys(updates).length) (node as InstanceNode).setProperties(updates);
     } else if (field === "textRangeFills") {
-      unmatched.push({ category: "variables", name: "(texte multi-couleurs)", nodeName: node.name });
+      unmatched.push({ category: "variables", name: "(multi-color text)", nodeName: node.name });
     } else {
       const alias = value as VariableAlias;
       const targetVar = await resolveTargetVariable(alias, sourceCat, targetCat, counts, unmatched, node.name);
@@ -572,17 +572,17 @@ async function runSwap(msg: Extract<UiToMainMessage, { type: "run-swap" }>) {
 
   const cfg = await loadConfig();
   if (!cfg.token) {
-    post({ type: "error", message: "Aucun token Figma enregistré. Ajoute-le dans l'onglet Configuration." });
+    post({ type: "error", message: "No Figma token saved. Add it in the Configuration tab." });
     return;
   }
   if (!cfg.base) {
-    post({ type: "error", message: "Aucune library de référence définie." });
+    post({ type: "error", message: "No reference library set." });
     return;
   }
 
   const target = cfg.targets.find((t) => t.id === msg.targetId);
   if (!target) {
-    post({ type: "error", message: "Library cible introuvable." });
+    post({ type: "error", message: "Target library not found." });
     return;
   }
 
@@ -593,7 +593,7 @@ async function runSwap(msg: Extract<UiToMainMessage, { type: "run-swap" }>) {
       ? [cfg.base.variableLibraryName, target.variableLibraryName]
       : [target.variableLibraryName, cfg.base.variableLibraryName];
 
-  post({ type: "log", level: "info", message: "Chargement des catalogues (composants, styles, variables)…" });
+  post({ type: "log", level: "info", message: "Loading catalogs (components, styles, variables)…" });
 
   let sourceCatalog: RestCatalog;
   let targetCatalog: RestCatalog;
@@ -603,7 +603,7 @@ async function runSwap(msg: Extract<UiToMainMessage, { type: "run-swap" }>) {
       fetchRestCatalog(cfg.token, fileKeyTarget),
     ]);
   } catch (e) {
-    post({ type: "error", message: `Échec du chargement des catalogues REST : ${e instanceof Error ? e.message : e}` });
+    post({ type: "error", message: `Failed to load REST catalogs: ${e instanceof Error ? e.message : e}` });
     return;
   }
 
@@ -616,14 +616,14 @@ async function runSwap(msg: Extract<UiToMainMessage, { type: "run-swap" }>) {
   const counts: SwapCounts = { components: 0, variables: 0, textStyles: 0, effectStyles: 0 };
   const unmatched: UnmatchedEntry[] = [];
 
-  post({ type: "log", level: "info", message: "Swap des composants…" });
+  post({ type: "log", level: "info", message: "Swapping components…" });
   await processComponents(roots, sourceCatalog, targetCatalog, counts, unmatched);
 
   const allNodes: SceneNode[] = [];
   for (const root of roots) collectAll(root, allNodes);
 
   if (!cancelRequested && (sourceVarCatalog.byKey.size > 0 || targetVarCatalog.byKey.size > 0)) {
-    post({ type: "log", level: "info", message: "Swap des variables…" });
+    post({ type: "log", level: "info", message: "Swapping variables…" });
     let done = 0;
     for (const node of allNodes) {
       if (cancelRequested) break;
@@ -634,7 +634,7 @@ async function runSwap(msg: Extract<UiToMainMessage, { type: "run-swap" }>) {
   }
 
   if (!cancelRequested) {
-    post({ type: "log", level: "info", message: "Swap des text styles…" });
+    post({ type: "log", level: "info", message: "Swapping text styles…" });
     const textNodes = allNodes.filter((n) => n.type === "TEXT") as TextNode[];
     let done = 0;
     for (const t of textNodes) {
@@ -646,7 +646,7 @@ async function runSwap(msg: Extract<UiToMainMessage, { type: "run-swap" }>) {
   }
 
   if (!cancelRequested) {
-    post({ type: "log", level: "info", message: "Swap des effects…" });
+    post({ type: "log", level: "info", message: "Swapping effects…" });
     let done = 0;
     for (const node of allNodes) {
       if (cancelRequested) break;
@@ -658,7 +658,7 @@ async function runSwap(msg: Extract<UiToMainMessage, { type: "run-swap" }>) {
 
   post({ type: "done", counts, unmatched, elapsedMs: Date.now() - swapStartTime });
   figma.notify(
-    `Swap terminé : ${counts.components} composants, ${counts.variables} variables, ${counts.textStyles} text styles, ${counts.effectStyles} effects.`,
+    `Swap done: ${counts.components} components, ${counts.variables} variables, ${counts.textStyles} text styles, ${counts.effectStyles} effects.`,
   );
 }
 
@@ -686,12 +686,12 @@ async function sendInit() {
 async function handleSetBase(msg: Extract<UiToMainMessage, { type: "set-base" }>) {
   const cfg = await loadConfig();
   if (!cfg.token) {
-    post({ type: "base-error", message: "Ajoute un token avant de définir la library de référence." });
+    post({ type: "base-error", message: "Add a token before setting the reference library." });
     return;
   }
   const fileKey = extractFileKey(msg.fileUrl);
   if (!fileKey) {
-    post({ type: "base-error", message: "URL de fichier Figma invalide (attendu : figma.com/design/... ou /file/...)." });
+    post({ type: "base-error", message: "Invalid Figma file URL (expected: figma.com/design/... or /file/...)." });
     return;
   }
 
@@ -702,7 +702,7 @@ async function handleSetBase(msg: Extract<UiToMainMessage, { type: "set-base" }>
   } catch (e) {
     post({
       type: "base-error",
-      message: `Impossible d'accéder à ce fichier avec ce token (vérifie les droits et le scope file_content:read) : ${
+      message: `Could not access this file with this token (check permissions and the file_content:read scope): ${
         e instanceof Error ? e.message : e
       }`,
     });
@@ -718,13 +718,13 @@ async function handleSetBase(msg: Extract<UiToMainMessage, { type: "set-base" }>
 async function handleAddTarget(msg: Extract<UiToMainMessage, { type: "add-target" }>) {
   const cfg = await loadConfig();
   if (!cfg.token) {
-    post({ type: "target-error", message: "Ajoute un token avant de configurer une library cible." });
+    post({ type: "target-error", message: "Add a token before configuring a target library." });
     return;
   }
 
   const fileKey = extractFileKey(msg.fileUrl);
   if (!fileKey) {
-    post({ type: "target-error", message: "URL de fichier Figma invalide (attendu : figma.com/design/... ou /file/...)." });
+    post({ type: "target-error", message: "Invalid Figma file URL (expected: figma.com/design/... or /file/...)." });
     return;
   }
 
@@ -735,7 +735,7 @@ async function handleAddTarget(msg: Extract<UiToMainMessage, { type: "add-target
   } catch (e) {
     post({
       type: "target-error",
-      message: `Impossible d'accéder à ce fichier avec ce token (vérifie les droits et le scope file_content:read) : ${
+      message: `Could not access this file with this token (check permissions and the file_content:read scope): ${
         e instanceof Error ? e.message : e
       }`,
     });

@@ -17,7 +17,7 @@ function send(message: UiToMainMessage) {
 }
 
 const PHASE_LABEL: Record<SwapCategory, string> = {
-  components: "Composants",
+  components: "Components",
   variables: "Variables",
   textStyles: "Text styles",
   effectStyles: "Effects",
@@ -151,7 +151,7 @@ export function App() {
 
   function setBase() {
     if (!baseUrl) {
-      setBaseError("Renseigne l'URL du fichier de référence.");
+      setBaseError("Enter the reference file URL.");
       return;
     }
     setSavingBase(true);
@@ -161,7 +161,7 @@ export function App() {
 
   function addTarget() {
     if (!targetUrl) {
-      setTargetError("Renseigne l'URL du fichier cible.");
+      setTargetError("Enter the target file URL.");
       return;
     }
     setSavingTarget(true);
@@ -175,7 +175,7 @@ export function App() {
   }
 
   if (!config) {
-    return <div style={{ padding: 16, fontSize: 12 }}>Chargement…</div>;
+    return <div style={{ padding: 16, fontSize: 12 }}>Loading…</div>;
   }
 
   return (
@@ -193,13 +193,13 @@ export function App() {
         <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
           <Card title="Personal Access Token">
             <Field
-              label="Token Figma"
-              help="Scope file_content:read minimum. Créé une fois dans Figma > Settings > Personal access tokens, stocké localement (clientStorage), jamais transmis ailleurs qu'à api.figma.com."
+              label="Figma token"
+              help="Minimum scope file_content:read. Create once in Figma > Settings > Personal access tokens; stored locally (clientStorage), never sent anywhere except api.figma.com."
             >
               <div className="bsl-row-inline">
                 <Input
                   type="password"
-                  placeholder={config.hasToken ? "Token déjà enregistré" : "figd_…"}
+                  placeholder={config.hasToken ? "Token already saved" : "figd_…"}
                   value={tokenInput}
                   onChange={(e) => setTokenInput(e.target.value)}
                 />
@@ -208,18 +208,18 @@ export function App() {
                   disabled={!tokenInput}
                   onClick={() => send({ type: "save-token", token: tokenInput })}
                 >
-                  Enregistrer
+                  Save
                 </Button>
               </div>
             </Field>
             {config.hasToken && (
               <Button variant="destructive" onClick={() => send({ type: "clear-token" })}>
-                Supprimer le token
+                Delete token
               </Button>
             )}
           </Card>
 
-          <Card title="Library de référence">
+          <Card title="Reference library">
             {config.base ? (
               <>
                 <div className="bsl-pair-item">
@@ -232,22 +232,22 @@ export function App() {
                   </Button>
                 </div>
                 <div className="bsl-help">
-                  Toujours utilisée comme Library A (ex. Mealz DS / Neutral). Change-la ici si besoin.
+                  Always used as Library A (e.g. Mealz DS / Neutral). Change it here if needed.
                 </div>
               </>
             ) : (
-              <div className="bsl-help">Aucune library de référence définie — c'est la première chose à faire.</div>
+              <div className="bsl-help">No reference library set yet — this is the first thing to do.</div>
             )}
             <div className="bsl-row" style={{ marginTop: 8, borderTop: "1px solid hsl(var(--border))", paddingTop: 10 }}>
-              <Field label="URL du fichier de référence" help="Le fichier source de ton design system (ex. Mealz DS / Neutral).">
+              <Field label="Reference file URL" help="The source file of your design system (e.g. Mealz DS / Neutral).">
                 <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://www.figma.com/design/…" />
               </Field>
               <Field
-                label="Library de variables associée (optionnel)"
-                help="Doit être activée dans ce fichier (panneau Assets > Libraries) pour apparaître ici."
+                label="Associated variable library (optional)"
+                help="Must be enabled in this file (Assets > Libraries panel) to show up here."
               >
                 <Select value={baseVarLib} onChange={(e) => setBaseVarLib(e.target.value)}>
-                  <option value="">— aucune —</option>
+                  <option value="">— none —</option>
                   {enabledVarLibs.map((name) => (
                     <option key={name} value={name}>
                       {name}
@@ -257,14 +257,14 @@ export function App() {
               </Field>
               {baseError && <div className="bsl-log-line-error">{baseError}</div>}
               <Button full disabled={savingBase || !config.hasToken} onClick={setBase}>
-                {savingBase ? "Vérification…" : config.base ? "Remplacer la référence" : "Définir comme référence"}
+                {savingBase ? "Checking…" : config.base ? "Replace reference" : "Set as reference"}
               </Button>
-              {!config.hasToken && <div className="bsl-help">Ajoute d'abord un token ci-dessus.</div>}
+              {!config.hasToken && <div className="bsl-help">Add a token above first.</div>}
             </div>
           </Card>
 
-          <Card title="Libraries cibles (clients)">
-            {config.targets.length === 0 && <div className="bsl-help">Aucune library cible configurée pour l'instant.</div>}
+          <Card title="Target libraries (clients)">
+            {config.targets.length === 0 && <div className="bsl-help">No target library configured yet.</div>}
             {config.targets.map((t: TargetLibrary) => (
               <div className="bsl-pair-item" key={t.id}>
                 <span>
@@ -278,15 +278,15 @@ export function App() {
             ))}
 
             <div className="bsl-row" style={{ marginTop: 8, borderTop: "1px solid hsl(var(--border))", paddingTop: 10 }}>
-              <Field label="Nom (optionnel)" help="Par défaut : le nom réel du fichier Figma.">
+              <Field label="Name (optional)" help="Defaults to the actual Figma file name.">
                 <Input value={targetLabel} onChange={(e) => setTargetLabel(e.target.value)} placeholder="Client A" />
               </Field>
-              <Field label="URL fichier cible">
+              <Field label="Target file URL">
                 <Input value={targetUrl} onChange={(e) => setTargetUrl(e.target.value)} placeholder="https://www.figma.com/design/…" />
               </Field>
-              <Field label="Library de variables associée (optionnel)">
+              <Field label="Associated variable library (optional)">
                 <Select value={targetVarLib} onChange={(e) => setTargetVarLib(e.target.value)}>
-                  <option value="">— aucune —</option>
+                  <option value="">— none —</option>
                   {enabledVarLibs.map((name) => (
                     <option key={name} value={name}>
                       {name}
@@ -296,7 +296,7 @@ export function App() {
               </Field>
               {targetError && <div className="bsl-log-line-error">{targetError}</div>}
               <Button full disabled={savingTarget || !config.hasToken} onClick={addTarget}>
-                {savingTarget ? "Vérification…" : "Ajouter la library cible"}
+                {savingTarget ? "Checking…" : "Add target library"}
               </Button>
             </div>
           </Card>
@@ -306,16 +306,16 @@ export function App() {
       {tab === "swap" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
           {!config.base || config.targets.length === 0 ? (
-            <Card title="Configuration incomplète">
+            <Card title="Incomplete configuration">
               <div className="bsl-help">
-                Va dans l'onglet Configuration pour définir la library de référence
-                {!config.base ? "" : " (fait)"} et ajouter au moins une library cible.
+                Go to the Configuration tab to set the reference library
+                {!config.base ? "" : " (done)"} and add at least one target library.
               </div>
             </Card>
           ) : (
             <>
               <Card title="Libraries">
-                <Field label="Library cible">
+                <Field label="Target library">
                   <Select value={selectedTargetId} onChange={(e) => setSelectedTargetId(e.target.value)}>
                     {config.targets.map((t) => (
                       <option key={t.id} value={t.id}>
@@ -332,38 +332,38 @@ export function App() {
                       {
                         value: "BaseToTarget",
                         label: `${config.base.fileName} → ${selectedTarget.label}`,
-                        description: "Remplace les assets de la référence par leurs équivalents dans la cible",
+                        description: "Replaces reference assets with their equivalents in the target",
                       },
                       {
                         value: "TargetToBase",
                         label: `${selectedTarget.label} → ${config.base.fileName}`,
-                        description: "Remplace les assets de la cible par leurs équivalents dans la référence",
+                        description: "Replaces target assets with their equivalents in the reference",
                       },
                     ]}
                   />
                 )}
               </Card>
 
-              <Card title="Portée">
+              <Card title="Scope">
                 <RadioGroup
                   value={scope}
                   onChange={setScope}
                   options={[
-                    { value: "selection", label: "Sélection actuelle", description: hasSelection ? "Frame, section ou éléments sélectionnés" : "Rien n'est sélectionné — bascule sur toute la page" },
-                    { value: "page", label: "Toute la page", description: "Traite tous les éléments de la page active" },
+                    { value: "selection", label: "Current selection", description: hasSelection ? "Frame, section, or selected elements" : "Nothing selected — falls back to the whole page" },
+                    { value: "page", label: "Whole page", description: "Processes every element on the active page" },
                   ]}
                 />
-                {scopeInfo && <div className="bsl-help">{scopeInfo.label} · {scopeInfo.count} nœuds</div>}
+                {scopeInfo && <div className="bsl-help">{scopeInfo.label} · {scopeInfo.count} nodes</div>}
               </Card>
 
               <Button full disabled={running} onClick={runSwap}>
-                {running ? "Swap en cours…" : "Lancer le swap"}
+                {running ? "Swapping…" : "Run swap"}
               </Button>
 
               {running && (
-                <Card title="Progression">
+                <Card title="Progress">
                   <div className="bsl-row-inline" style={{ justifyContent: "space-between" }}>
-                    <Badge>{phase ? PHASE_LABEL[phase] : "Préparation…"}</Badge>
+                    <Badge>{phase ? PHASE_LABEL[phase] : "Preparing…"}</Badge>
                     <span className="bsl-help">{(elapsedMs / 1000).toFixed(1)}s</span>
                   </div>
                   <Progress value={phaseDone} max={phaseTotal || 1} />
@@ -371,23 +371,23 @@ export function App() {
                     {phaseTotal > 0 ? `${phaseDone} / ${phaseTotal}` : "…"}
                   </div>
                   <Button variant="destructive" onClick={() => send({ type: "cancel-swap" })}>
-                    Annuler
+                    Cancel
                   </Button>
                 </Card>
               )}
 
               {errorMsg && (
-                <Card title="Erreur">
+                <Card title="Error">
                   <div className="bsl-log-line-error">{errorMsg}</div>
                 </Card>
               )}
 
               {result && (
-                <Card title="Résultat">
+                <Card title="Result">
                   <div className="bsl-counts-grid">
                     <div className="bsl-count-box">
                       <div className="bsl-count-value">{result.counts.components}</div>
-                      <div className="bsl-count-label">Composants</div>
+                      <div className="bsl-count-label">Components</div>
                     </div>
                     <div className="bsl-count-box">
                       <div className="bsl-count-value">{result.counts.variables}</div>
@@ -402,11 +402,11 @@ export function App() {
                       <div className="bsl-count-label">Effects</div>
                     </div>
                   </div>
-                  <div className="bsl-help">Terminé en {(result.elapsedMs / 1000).toFixed(1)}s</div>
+                  <div className="bsl-help">Done in {(result.elapsedMs / 1000).toFixed(1)}s</div>
 
                   {result.unmatched.length > 0 && (
                     <>
-                      <div className="bsl-label">{result.unmatched.length} non swappés (pas d'équivalent trouvé)</div>
+                      <div className="bsl-label">{result.unmatched.length} not swapped (no match found)</div>
                       <div className="bsl-log">
                         {result.unmatched.map((u, i) => (
                           <div key={i} className="bsl-log-line-warn bsl-log-line">
