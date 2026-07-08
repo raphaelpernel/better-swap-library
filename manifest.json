@@ -1,0 +1,14 @@
+{
+  "name": "Better Swap Library",
+  "id": "better-swap-library-local",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "dist/ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "permissions": ["teamlibrary"],
+  "networkAccess": {
+    "allowedDomains": ["https://api.figma.com"],
+    "reasoning": "Le catalogue complet des composants et styles d'une library distante n'est pas exposé par l'API Plugin (seules les variables le sont via figma.teamLibrary). Pour matcher tous les composants/text styles/effects entre deux libraries - pas seulement ceux déjà utilisés dans ce fichier - le plugin appelle la REST API Figma avec un Personal Access Token fourni par l'utilisateur."
+  }
+}

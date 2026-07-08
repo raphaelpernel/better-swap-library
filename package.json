@@ -1,0 +1,21 @@
+{
+  "name": "better-swap-library",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Figma plugin - swap two libraries (composants puis variables, text styles, effects) plus vite et plus fiable que le swap natif",
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.100.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "esbuild": "^0.23.0",
+    "typescript": "^5.5.4"
+  }
+}
