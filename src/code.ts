@@ -622,14 +622,27 @@ async function runSwap(msg: Extract<UiToMainMessage, { type: "run-swap" }>) {
   const allNodes: SceneNode[] = [];
   for (const root of roots) collectAll(root, allNodes);
 
-  if (!cancelRequested && (sourceVarCatalog.byKey.size > 0 || targetVarCatalog.byKey.size > 0)) {
-    post({ type: "log", level: "info", message: "Swapping variables…" });
-    let done = 0;
-    for (const node of allNodes) {
-      if (cancelRequested) break;
-      await processNodeVariables(node, sourceVarCatalog, targetVarCatalog, counts, unmatched);
-      done++;
-      reportProgress("variables", done, allNodes.length);
+  if (!cancelRequested) {
+    if (sourceVarCatalog.byKey.size === 0) {
+      // Matching a variable requires its key to be found in the SOURCE
+      // catalog first (see resolveTargetVariable). If no variable library
+      // is configured on the source side, every single variable is skipped
+      // silently, which used to show up as an unexplained "0" with nothing
+      // in the unmatched list. Surface it clearly instead.
+      unmatched.push({
+        category: "variables",
+        name: "(no variable library configured on the source side — set it in Configuration)",
+        nodeName: "—",
+      });
+    } else {
+      post({ type: "log", level: "info", message: "Swapping variables…" });
+      let done = 0;
+      for (const node of allNodes) {
+        if (cancelRequested) break;
+        await processNodeVariables(node, sourceVarCatalog, targetVarCatalog, counts, unmatched);
+        done++;
+        reportProgress("variables", done, allNodes.length);
+      }
     }
   }
 
