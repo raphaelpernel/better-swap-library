@@ -243,11 +243,11 @@ export function App() {
                 <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://www.figma.com/design/…" />
               </Field>
               <Field
-                label="Associated variable library (optional)"
-                help="Must be enabled in this file (Assets > Libraries panel) to show up here."
+                label="Variable library name override (optional)"
+                help="Variables are matched automatically using the file name above. Only set this if the published library name differs from the file name. Must be enabled in this file's Assets > Libraries panel to show up here."
               >
                 <Select value={baseVarLib} onChange={(e) => setBaseVarLib(e.target.value)}>
-                  <option value="">— none —</option>
+                  <option value="">— use file name (default) —</option>
                   {enabledVarLibs.map((name) => (
                     <option key={name} value={name}>
                       {name}
@@ -284,9 +284,12 @@ export function App() {
               <Field label="Target file URL">
                 <Input value={targetUrl} onChange={(e) => setTargetUrl(e.target.value)} placeholder="https://www.figma.com/design/…" />
               </Field>
-              <Field label="Associated variable library (optional)">
+              <Field
+                label="Variable library name override (optional)"
+                help="Variables are matched automatically using the file name. Only set this if the published library name differs from the file name."
+              >
                 <Select value={targetVarLib} onChange={(e) => setTargetVarLib(e.target.value)}>
-                  <option value="">— none —</option>
+                  <option value="">— use file name (default) —</option>
                   {enabledVarLibs.map((name) => (
                     <option key={name} value={name}>
                       {name}

@@ -588,10 +588,15 @@ async function runSwap(msg: Extract<UiToMainMessage, { type: "run-swap" }>) {
 
   const [fileKeySource, fileKeyTarget] =
     msg.direction === "BaseToTarget" ? [cfg.base.fileKey, target.fileKey] : [target.fileKey, cfg.base.fileKey];
+  // "variableLibraryName" is only an override. By default, always fall back
+  // to the real file name so variables are considered automatically as soon
+  // as a reference/target library is configured - no separate manual step
+  // required for the common case where the published library name matches
+  // the file name.
   const [varLibSource, varLibTarget] =
     msg.direction === "BaseToTarget"
-      ? [cfg.base.variableLibraryName, target.variableLibraryName]
-      : [target.variableLibraryName, cfg.base.variableLibraryName];
+      ? [cfg.base.variableLibraryName || cfg.base.fileName, target.variableLibraryName || target.fileName]
+      : [target.variableLibraryName || target.fileName, cfg.base.variableLibraryName || cfg.base.fileName];
 
   post({ type: "log", level: "info", message: "Loading catalogs (components, styles, variables)…" });
 
@@ -631,8 +636,8 @@ async function runSwap(msg: Extract<UiToMainMessage, { type: "run-swap" }>) {
       // in the unmatched list. Surface it clearly instead.
       unmatched.push({
         category: "variables",
-        name: "(no variable library configured on the source side — set it in Configuration)",
-        nodeName: "—",
+        name: `(no variables found for "${varLibSource}" - make sure this library is enabled in this file's Assets > Libraries panel, or set an override name in Configuration if its published name differs from the file name)`,
+        nodeName: "-",
       });
     } else {
       post({ type: "log", level: "info", message: "Swapping variables…" });
@@ -686,7 +691,7 @@ async function sendInit() {
     const collections = await figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync();
     libNames = Array.from(new Set(collections.map((c) => c.libraryName))).sort();
   } catch {
-    // teamlibrary indisponible (permissions ou aucune library de variables activée)
+    // teamlibrary indisponible (permissions ou aucune library de variables activee)
   }
   post({
     type: "init",
