@@ -61,6 +61,17 @@ manifest…** et sélectionner `manifest.json` à la racine de ce dossier.
 
 ## Limites connues de cette première version
 
+- **Les variables ne sont swappées que si la library est activée dans le
+  fichier ouvert** (Assets > Libraries) — c'est une limite de `figma.teamLibrary`
+  (l'API Plugin), pas du plugin lui-même : il n'existe pas d'API Plugin pour
+  lister les variables d'une library non activée dans le fichier courant (la
+  REST API équivalente est réservée aux comptes Enterprise). Le nom de la
+  library est résolu automatiquement à partir du nom réel du fichier (le
+  champ "Variable library name override" ne sert que si le nom publié de la
+  library diffère du nom du fichier). Si tu viens tout juste d'activer une
+  library et que 0 variable est trouvé, **ferme et rouvre le fichier Figma**
+  (pas juste le plugin) — une library fraîchement activée n'est parfois
+  synchronisée pour l'API Plugin qu'après un reload complet du document.
 - Les bindings de variable **par plage de caractères** sur du texte
   multi-couleurs (`boundVariables.textRangeFills`) ne sont pas remappés
   automatiquement — juste signalés dans le rapport.
@@ -70,4 +81,12 @@ manifest…** et sélectionner `manifest.json` à la racine de ce dossier.
 - Le matching par **clé** ne sert que si les deux libraries partagent
   effectivement des clés identiques (rare entre deux libraries indépendantes,
   utile si Library B a été dupliquée depuis Library A). Le matching par
-  **nom complet** (`ComponentSet/Variant` ou `Collec
+  **nom complet** (`ComponentSet/Variant` ou `Collection/Variable`) est la
+  voie principale, exactement comme le swap natif.
+- **Composants imbriqués** (ex. un "Button" à l'intérieur d'un "Product
+  Card") : les instances sont swappées en ordre bottom-up (enfants avant
+  parents) pour éviter que le swap du parent n'invalide la référence à
+  l'enfant avant qu'on ait pu la traiter. Mais swapper le composant principal
+  d'un parent déclenche aussi la reconciliation interne de Figma sur ses
+  instances imbriquées (le même mécanisme que le swap natif dans l'UI) — si
+  le Pro
