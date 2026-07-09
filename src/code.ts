@@ -300,6 +300,7 @@ async function resolveTargetVariable(
   counts: SwapCounts,
   unmatched: UnmatchedEntry[],
   nodeName: string,
+  collectionMap?: Map<string, string>,
 ): Promise<Variable | null> {
   if (!alias || !alias.id) return null;
   const variable = await figma.variables.getVariableByIdAsync(alias.id);
@@ -316,6 +317,14 @@ async function resolveTargetVariable(
 
   const targetVariable = await importVariableCached(targetKey);
   counts.variables++;
+  // On note quelle collection source correspond a quelle collection cible :
+  // sert ensuite a remapper les modes explicites (voir remapExplicitModes).
+  // Le rebind de la variable a lui seul ne suffit pas : le node peut avoir
+  // choisi explicitement un mode ("Dark") sur l'ANCIENNE collection, qui
+  // devient orphelin une fois la variable rattachee a la collection cible.
+  if (collectionMap && variable.variableCollectionId && targetVariable.variableCollectionId) {
+    collectionMap.set(variable.variableCollectionId, targetVariable.variableCollectionId);
+  }
   return targetVariable;
 }
 
@@ -325,6 +334,7 @@ async function processNodeVariables(
   targetCat: VariableCatalog,
   counts: SwapCounts,
   unmatched: UnmatchedEntry[],
+  collectionMap: Map<string, string>,
 ) {
   const bv = (node as unknown as { boundVariables?: Record<string, unknown> }).boundVariables;
   if (!bv) return;
@@ -347,6 +357,7 @@ async function processNodeVariables(
             counts,
             unmatched,
             node.name,
+            collectionMap,
           );
           if (!targetVar) return paint;
           changed = true;
@@ -373,7 +384,7 @@ async function processNodeVariables(
           let updated = effect;
           for (const key of Object.keys(effectBoundVars)) {
             const alias = effectBoundVars[key];
-            const targetVar = await resolveTargetVariable(alias, sourceCat, targetCat, counts, unmatched, node.name);
+            const targetVar = await resolveTargetVariable(alias, sourceCat, targetCat, counts, unmatched, node.name, collectionMap);
             if (targetVar) {
               updated = figma.variables.setBoundVariableForEffect(updated, key as VariableBindableEffectField, targetVar);
               changed = true;
@@ -393,7 +404,7 @@ async function processNodeVariables(
           let updated = grid;
           for (const key of Object.keys(grid.boundVariables)) {
             const alias = (grid.boundVariables as Record<string, VariableAlias>)[key];
-            const targetVar = await resolveTargetVariable(alias, sourceCat, targetCat, counts, unmatched, node.name);
+            const targetVar = await resolveTargetVariable(alias, sourceCat, targetCat, counts, unmatched, node.name, collectionMap);
             if (targetVar) {
               updated = figma.variables.setBoundVariableForLayoutGrid(updated, key as VariableBindableLayoutGridField, targetVar);
               changed = true;
@@ -408,7 +419,7 @@ async function processNodeVariables(
       const props = value as Record<string, VariableAlias>;
       const updates: { [propertyName: string]: string | boolean | VariableAlias } = {};
       for (const propName of Object.keys(props)) {
-        const targetVar = await resolveTargetVariable(props[propName], sourceCat, targetCat, counts, unmatched, node.name);
+        const targetVar = await resolveTargetVariable(props[propName], sourceCat, targetCat, counts, unmatched, node.name, collectionMap);
         if (targetVar) updates[propName] = figma.variables.createVariableAlias(targetVar);
       }
       if (Object.keys(updates).length) (node as InstanceNode).setProperties(updates);
@@ -416,7 +427,7 @@ async function processNodeVariables(
       unmatched.push({ category: "variables", name: "(multi-color text)", nodeName: node.name });
     } else {
       const alias = value as VariableAlias;
-      const targetVar = await resolveTargetVariable(alias, sourceCat, targetCat, counts, unmatched, node.name);
+      const targetVar = await resolveTargetVariable(alias, sourceCat, targetCat, counts, unmatched, node.name, collectionMap);
       if (targetVar) {
         try {
           anyNode.setBoundVariable(field, targetVar);
@@ -426,6 +437,73 @@ async function processNodeVariables(
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2b - remap explicit variable modes (ex. "Dark" applique sur un
+// frame/instance). Rebinder une variable ne suffit pas : le node peut avoir
+// choisi explicitement un mode sur la collection SOURCE
+// (node.explicitVariableModes[sourceCollectionId] = sourceModeId). Une fois
+// la variable rattachee a la collection CIBLE, cette entree devient
+// orpheline et Figma retombe sur le mode par defaut de la collection cible -
+// exactement le bug de "mode non swappe correctement" que ce plugin doit
+// corriger. On retrouve le mode de meme NOM ("Dark" -> "Dark") dans la
+// collection cible et on le reapplique explicitement sur chaque node
+// concerne.
+// ---------------------------------------------------------------------------
+
+async function remapExplicitVariableModes(
+  allNodes: SceneNode[],
+  collectionMap: Map<string, string>,
+): Promise<number> {
+  if (collectionMap.size === 0) return 0;
+
+  const collectionCache = new Map<string, VariableCollection | null>();
+  async function getCollection(id: string): Promise<VariableCollection | null> {
+    if (collectionCache.has(id)) return collectionCache.get(id)!;
+    let col: VariableCollection | null = null;
+    try {
+      col = await figma.variables.getVariableCollectionByIdAsync(id);
+    } catch {
+      col = null;
+    }
+    collectionCache.set(id, col);
+    return col;
+  }
+
+  const modeIdMap = new Map<string, string>();
+  for (const [srcColId, tgtColId] of collectionMap.entries()) {
+    const srcCol = await getCollection(srcColId);
+    const tgtCol = await getCollection(tgtColId);
+    if (!srcCol || !tgtCol) continue;
+    for (const m of srcCol.modes) {
+      const match = tgtCol.modes.find((tm) => tm.name === m.name);
+      if (match) modeIdMap.set(m.modeId, match.modeId);
+    }
+  }
+
+  if (modeIdMap.size === 0) return 0;
+
+  let remapped = 0;
+  for (const node of allNodes) {
+    const anyNode = node as any;
+    const explicit = anyNode.explicitVariableModes as Record<string, string> | undefined;
+    if (!explicit) continue;
+    for (const [colId, modeId] of Object.entries(explicit)) {
+      const targetColId = collectionMap.get(colId);
+      const targetModeId = modeIdMap.get(modeId);
+      if (!targetColId || !targetModeId) continue;
+      const targetCol = await getCollection(targetColId);
+      if (!targetCol) continue;
+      try {
+        anyNode.setExplicitVariableModeForCollection(targetCol, targetModeId);
+        remapped++;
+      } catch {
+        // Ce type de node ne supporte pas setExplicitVariableModeForCollection.
+      }
+    }
+  }
+  return remapped;
 }
 
 // ---------------------------------------------------------------------------
@@ -620,6 +698,9 @@ async function runSwap(msg: Extract<UiToMainMessage, { type: "run-swap" }>) {
   const roots = getScopeRoots(msg.scope);
   const counts: SwapCounts = { components: 0, variables: 0, textStyles: 0, effectStyles: 0 };
   const unmatched: UnmatchedEntry[] = [];
+  // sourceCollectionId -> targetCollectionId, alimente au fil des variables
+  // effectivement rebindees. Sert a remapper les modes explicites ensuite.
+  const collectionMap = new Map<string, string>();
 
   post({ type: "log", level: "info", message: "Swapping components…" });
   await processComponents(roots, sourceCatalog, targetCatalog, counts, unmatched);
@@ -644,9 +725,21 @@ async function runSwap(msg: Extract<UiToMainMessage, { type: "run-swap" }>) {
       let done = 0;
       for (const node of allNodes) {
         if (cancelRequested) break;
-        await processNodeVariables(node, sourceVarCatalog, targetVarCatalog, counts, unmatched);
+        await processNodeVariables(node, sourceVarCatalog, targetVarCatalog, counts, unmatched, collectionMap);
         done++;
         reportProgress("variables", done, allNodes.length);
+      }
+
+      if (!cancelRequested) {
+        post({ type: "log", level: "info", message: "Remapping variable modes…" });
+        const modesRemapped = await remapExplicitVariableModes(allNodes, collectionMap);
+        if (modesRemapped > 0) {
+          post({
+            type: "log",
+            level: "info",
+            message: `${modesRemapped} explicit variable mode override(s) (e.g. Dark) remapped to the target library.`,
+          });
+        }
       }
     }
   }
