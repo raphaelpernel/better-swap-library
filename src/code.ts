@@ -472,37 +472,65 @@ async function remapExplicitVariableModes(
   }
 
   const modeIdMap = new Map<string, string>();
+  console.log(`[BSL] remapExplicitVariableModes: ${collectionMap.size} collection pair(s) to check`);
   for (const [srcColId, tgtColId] of collectionMap.entries()) {
     const srcCol = await getCollection(srcColId);
     const tgtCol = await getCollection(tgtColId);
-    if (!srcCol || !tgtCol) continue;
+    if (!srcCol || !tgtCol) {
+      console.log(`[BSL]   pair ${srcColId} -> ${tgtColId}: could not load ${!srcCol ? "source" : "target"} collection`);
+      continue;
+    }
+    console.log(
+      `[BSL]   pair "${srcCol.name}" (${srcColId}, modes: ${srcCol.modes.map((m) => JSON.stringify(m.name)).join(", ")}) -> "${tgtCol.name}" (${tgtColId}, modes: ${tgtCol.modes.map((m) => JSON.stringify(m.name)).join(", ")})`,
+    );
     for (const m of srcCol.modes) {
-      const match = tgtCol.modes.find((tm) => tm.name === m.name);
-      if (match) modeIdMap.set(m.modeId, match.modeId);
+      const match = tgtCol.modes.find((tm) => tm.name.trim().toLowerCase() === m.name.trim().toLowerCase());
+      if (match) {
+        modeIdMap.set(m.modeId, match.modeId);
+        console.log(`[BSL]     mode "${m.name}" (${m.modeId}) -> "${match.name}" (${match.modeId})`);
+      } else {
+        console.log(`[BSL]     mode "${m.name}" (${m.modeId}) -> NO MATCH in target collection`);
+      }
     }
   }
 
-  if (modeIdMap.size === 0) return 0;
+  if (modeIdMap.size === 0) {
+    console.log("[BSL] remapExplicitVariableModes: no mode name matched anywhere, nothing to remap");
+    return 0;
+  }
 
   let remapped = 0;
+  let nodesWithExplicitModes = 0;
   for (const node of allNodes) {
     const anyNode = node as any;
     const explicit = anyNode.explicitVariableModes as Record<string, string> | undefined;
-    if (!explicit) continue;
+    if (!explicit || Object.keys(explicit).length === 0) continue;
+    nodesWithExplicitModes++;
     for (const [colId, modeId] of Object.entries(explicit)) {
       const targetColId = collectionMap.get(colId);
       const targetModeId = modeIdMap.get(modeId);
-      if (!targetColId || !targetModeId) continue;
+      if (!targetColId || !targetModeId) {
+        console.log(
+          `[BSL]   node "${node.name}" explicit mode on collection ${colId} (mode ${modeId}): ${
+            !targetColId ? "collection not in collectionMap (not swapped here)" : "mode id not in modeIdMap"
+          }`,
+        );
+        continue;
+      }
       const targetCol = await getCollection(targetColId);
       if (!targetCol) continue;
       try {
         anyNode.setExplicitVariableModeForCollection(targetCol, targetModeId);
         remapped++;
-      } catch {
-        // Ce type de node ne supporte pas setExplicitVariableModeForCollection.
+        console.log(`[BSL]   node "${node.name}": mode remapped to "${targetCol.name}" / ${targetModeId}`);
+      } catch (e) {
+        console.log(`[BSL]   node "${node.name}": setExplicitVariableModeForCollection threw: ${e}`);
       }
     }
   }
+  console.log(
+    `[BSL] remapExplicitVariableModes done: ${nodesWithExplicitModes} node(s) had explicit modes, ${remapped} override(s) actually remapped`,
+  );
   return remapped;
 }
 

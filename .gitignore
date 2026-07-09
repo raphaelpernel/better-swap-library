@@ -1,2 +1,5 @@
 node_modules/
 dist/
+dist-ui-tmp/
+.DS_Store
+*.log
