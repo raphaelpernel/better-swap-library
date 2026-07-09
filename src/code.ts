@@ -55,13 +55,6 @@ interface VariableCatalog {
 let cancelRequested = false;
 
 figma.showUI(__html__, { width: 460, height: 680, themeColors: true });
-console.log("[BSL] plugin started — if you don't see this line, the console isn't attached to this plugin's process.");
-// Filet de securite independant de la console : un banner visible sur le
-// canvas ne peut pas etre rate, contrairement a un console.log qui depend
-// d'avoir la bonne fenetre de console ouverte au bon moment. Sert a isoler
-// si le probleme est "le nouveau build ne tourne pas du tout" vs "le build
-// tourne mais la console n'affiche rien".
-figma.notify("BSL DEBUG: nouveau build chargé (voir console pour les logs [BSL])", { timeout: 4000 });
 
 function post(message: MainToUiMessage) {
   figma.ui.postMessage(message);
@@ -311,28 +304,13 @@ async function resolveTargetVariable(
 ): Promise<Variable | null> {
   if (!alias || !alias.id) return null;
   const variable = await figma.variables.getVariableByIdAsync(alias.id);
-  if (!variable) {
-    console.log(`[BSL] resolveTargetVariable: node "${nodeName}" — could not load variable for alias id ${alias.id}`);
-    return null;
-  }
-  if (!variable.remote) {
-    console.log(
-      `[BSL] resolveTargetVariable: node "${nodeName}" — variable "${variable.name}" is LOCAL (not remote), skipped. If this is meant to come from the library, it's likely a local alias/token wrapping the library variable rather than the library variable itself.`,
-    );
-    return null;
-  }
-  if (!sourceCat.byKey.has(variable.key)) {
-    console.log(
-      `[BSL] resolveTargetVariable: node "${nodeName}" — variable "${variable.name}" (key ${variable.key}) is remote but not found in the SOURCE catalog (wrong library enabled/named, or belongs to a different library than the one configured as source).`,
-    );
-    return null; // pas une variable de la library source
-  }
+  if (!variable || !variable.remote) return null;
+  if (!sourceCat.byKey.has(variable.key)) return null; // pas une variable de la library source
 
   const fullName = sourceCat.byKey.get(variable.key)!;
   const targetKey = targetCat.byKey.has(variable.key) ? variable.key : targetCat.byName.get(fullName);
 
   if (!targetKey) {
-    console.log(`[BSL] resolveTargetVariable: node "${nodeName}" — "${fullName}" has no match in the TARGET catalog.`);
     unmatched.push({ category: "variables", name: fullName, nodeName });
     return null;
   }
@@ -340,10 +318,7 @@ async function resolveTargetVariable(
   const targetVariable = await importVariableCached(targetKey);
   counts.variables++;
   // On note quelle collection source correspond a quelle collection cible :
-  // sert ensuite a remapper les modes explicites (voir remapExplicitModes).
-  // Le rebind de la variable a lui seul ne suffit pas : le node peut avoir
-  // choisi explicitement un mode ("Dark") sur l'ANCIENNE collection, qui
-  // devient orphelin une fois la variable rattachee a la collection cible.
+  // sert ensuite a remapper les modes explicites (voir remapExplicitVariableModes).
   if (collectionMap && variable.variableCollectionId && targetVariable.variableCollectionId) {
     collectionMap.set(variable.variableCollectionId, targetVariable.variableCollectionId);
   }
@@ -467,27 +442,21 @@ async function processNodeVariables(
 // choisi explicitement un mode sur la collection SOURCE
 // (node.explicitVariableModes[sourceCollectionId] = sourceModeId). Une fois
 // la variable rattachee a la collection CIBLE, cette entree devient
-// orpheline et Figma retombe sur le mode par defaut de la collection cible -
-// exactement le bug de "mode non swappe correctement" que ce plugin doit
-// corriger. On retrouve le mode de meme NOM ("Dark" -> "Dark") dans la
-// collection cible et on le reapplique explicitement sur chaque node
-// concerne.
+// orpheline et Figma retombe sur le mode par defaut de la collection cible.
+//
+// node.explicitVariableModes peut pointer vers un ancien proxy local de la
+// collection remote, different du proxy local utilise par la variable
+// reellement bindee sur ce meme node, meme si les deux designent la MEME
+// collection distante (ex. "Aliases"). On ne se fie donc pas aux ids
+// locaux : on repart du NOM de la collection source (stable) et on va
+// chercher directement dans la library CIBLE la collection de meme nom,
+// exactement comme pour variables/composants.
 // ---------------------------------------------------------------------------
 
 async function remapExplicitVariableModes(
   allNodes: SceneNode[],
   targetLibraryName: string | undefined,
 ): Promise<number> {
-  // Bug identifie via les logs : node.explicitVariableModes peut pointer vers
-  // un ANCIEN proxy local de la collection remote (ex.
-  // "VariableCollectionId:HASH/9:625"), different du proxy local utilise
-  // actuellement par la variable reellement bindee sur ce meme node (ex.
-  // ".../461:93) - meme si les deux designent la MEME collection distante
-  // "Aliases". Un Map<sourceCollectionId, targetCollectionId> alimente
-  // pendant le rebind des variables ne peut donc pas retrouver cette entree.
-  // On ne se fie plus du tout aux ids locaux : on repart du NOM de la
-  // collection source (stable) et on va chercher directement dans la library
-  // CIBLE la collection de meme nom, exactement comme pour variables/composants.
   if (!targetLibraryName) return 0;
 
   const byCollectionId = new Map<string, { node: SceneNode; modeId: string }[]>();
@@ -501,7 +470,6 @@ async function remapExplicitVariableModes(
       byCollectionId.set(colId, list);
     }
   }
-  console.log(`[BSL] remapExplicitVariableModes: ${byCollectionId.size} distinct collection id(s) carry explicit mode overrides in scope`);
   if (byCollectionId.size === 0) return 0;
 
   let targetLibCollections: { key: string; name: string; libraryName: string }[] = [];
@@ -509,13 +477,9 @@ async function remapExplicitVariableModes(
     targetLibCollections = (await figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync()).filter(
       (c) => c.libraryName === targetLibraryName,
     );
-  } catch (e) {
-    console.log(`[BSL] remapExplicitVariableModes: could not list target library collections: ${e}`);
+  } catch {
     return 0;
   }
-  console.log(
-    `[BSL] target library "${targetLibraryName}" has ${targetLibCollections.length} collection(s): ${targetLibCollections.map((c) => c.name).join(", ")}`,
-  );
 
   let remapped = 0;
   for (const [colId, entries] of byCollectionId.entries()) {
@@ -525,83 +489,50 @@ async function remapExplicitVariableModes(
     } catch {
       srcCol = null;
     }
-    if (!srcCol) {
-      console.log(`[BSL]   collection ${colId}: could not resolve locally, skipped`);
-      continue;
-    }
-    if (!srcCol.remote) {
-      console.log(`[BSL]   collection "${srcCol.name}" (${colId}) is local (not from a library), skipped`);
-      continue;
-    }
+    if (!srcCol || !srcCol.remote) continue;
 
     const targetLibCol = targetLibCollections.find((c) => c.name.trim().toLowerCase() === srcCol!.name.trim().toLowerCase());
-    if (!targetLibCol) {
-      console.log(
-        `[BSL]   collection "${srcCol.name}" (${colId}): no collection with the same name in target library "${targetLibraryName}"`,
-      );
-      continue;
-    }
+    if (!targetLibCol) continue;
 
     // L'API teamLibrary n'expose pas les modes d'une collection distante tant
     // qu'aucune de ses variables n'a ete importee dans ce fichier : on
     // importe donc n'importe laquelle de ses variables pour materialiser un
-    // proxy local et pouvoir lire targetCol.modes.
+    // proxy local et pouvoir lire tgtCol.modes.
     let targetVars;
     try {
       targetVars = await figma.teamLibrary.getVariablesInLibraryCollectionAsync(targetLibCol.key);
-    } catch (e) {
-      console.log(`[BSL]   could not list variables of target collection "${targetLibCol.name}": ${e}`);
+    } catch {
       continue;
     }
-    if (targetVars.length === 0) {
-      console.log(`[BSL]   target collection "${targetLibCol.name}" has no variables, cannot materialize modes`);
-      continue;
-    }
+    if (targetVars.length === 0) continue;
+
     let anyTargetVar: Variable;
     try {
       anyTargetVar = await importVariableCached(targetVars[0].key);
-    } catch (e) {
-      console.log(`[BSL]   could not import a variable from target collection "${targetLibCol.name}": ${e}`);
+    } catch {
       continue;
     }
     const tgtCol = await figma.variables.getVariableCollectionByIdAsync(anyTargetVar.variableCollectionId);
-    if (!tgtCol) {
-      console.log(`[BSL]   could not resolve local proxy for target collection "${targetLibCol.name}"`);
-      continue;
-    }
-
-    console.log(
-      `[BSL]   collection "${srcCol.name}" (${colId}, modes: ${srcCol.modes.map((m) => JSON.stringify(m.name)).join(", ")}) -> "${tgtCol.name}" (${tgtCol.id}, modes: ${tgtCol.modes.map((m) => JSON.stringify(m.name)).join(", ")})`,
-    );
+    if (!tgtCol) continue;
 
     const modeIdMap = new Map<string, string>();
     for (const m of srcCol.modes) {
       const match = tgtCol.modes.find((tm) => tm.name.trim().toLowerCase() === m.name.trim().toLowerCase());
-      if (match) {
-        modeIdMap.set(m.modeId, match.modeId);
-        console.log(`[BSL]     mode "${m.name}" (${m.modeId}) -> "${match.name}" (${match.modeId})`);
-      } else {
-        console.log(`[BSL]     mode "${m.name}" (${m.modeId}) -> NO MATCH in target collection`);
-      }
+      if (match) modeIdMap.set(m.modeId, match.modeId);
     }
 
     for (const { node, modeId } of entries) {
       const targetModeId = modeIdMap.get(modeId);
-      if (!targetModeId) {
-        console.log(`[BSL]     node "${node.name}": mode ${modeId} has no name match in target collection, skipped`);
-        continue;
-      }
+      if (!targetModeId) continue;
       try {
         (node as any).setExplicitVariableModeForCollection(tgtCol, targetModeId);
         remapped++;
-        console.log(`[BSL]     node "${node.name}": mode remapped to "${tgtCol.name}" / ${targetModeId}`);
-      } catch (e) {
-        console.log(`[BSL]     node "${node.name}": setExplicitVariableModeForCollection threw: ${e}`);
+      } catch {
+        // Champ non re-bindable sur ce type de node : on ignore proprement.
       }
     }
   }
 
-  console.log(`[BSL] remapExplicitVariableModes done: ${remapped} override(s) remapped`);
   return remapped;
 }
 
@@ -830,9 +761,6 @@ async function runSwap(msg: Extract<UiToMainMessage, { type: "run-swap" }>) {
       }
 
       if (!cancelRequested) {
-        console.log(
-          `[BSL] variables phase done: counts.variables=${counts.variables}, collectionMap has ${collectionMap.size} collection pair(s) recorded`,
-        );
         post({ type: "log", level: "info", message: "Remapping variable modes…" });
         const modesRemapped = await remapExplicitVariableModes(allNodes, varLibTarget);
         if (modesRemapped > 0) {
