@@ -56,6 +56,12 @@ let cancelRequested = false;
 
 figma.showUI(__html__, { width: 460, height: 680, themeColors: true });
 console.log("[BSL] plugin started — if you don't see this line, the console isn't attached to this plugin's process.");
+// Filet de securite independant de la console : un banner visible sur le
+// canvas ne peut pas etre rate, contrairement a un console.log qui depend
+// d'avoir la bonne fenetre de console ouverte au bon moment. Sert a isoler
+// si le probleme est "le nouveau build ne tourne pas du tout" vs "le build
+// tourne mais la console n'affiche rien".
+figma.notify("BSL DEBUG: nouveau build chargé (voir console pour les logs [BSL])", { timeout: 4000 });
 
 function post(message: MainToUiMessage) {
   figma.ui.postMessage(message);
