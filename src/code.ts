@@ -476,55 +476,105 @@ async function processNodeVariables(
 
 async function remapExplicitVariableModes(
   allNodes: SceneNode[],
-  collectionMap: Map<string, string>,
+  targetLibraryName: string | undefined,
 ): Promise<number> {
-  console.log(`[BSL] remapExplicitVariableModes called: collectionMap has ${collectionMap.size} pair(s)`);
+  // Bug identifie via les logs : node.explicitVariableModes peut pointer vers
+  // un ANCIEN proxy local de la collection remote (ex.
+  // "VariableCollectionId:HASH/9:625"), different du proxy local utilise
+  // actuellement par la variable reellement bindee sur ce meme node (ex.
+  // ".../461:93) - meme si les deux designent la MEME collection distante
+  // "Aliases". Un Map<sourceCollectionId, targetCollectionId> alimente
+  // pendant le rebind des variables ne peut donc pas retrouver cette entree.
+  // On ne se fie plus du tout aux ids locaux : on repart du NOM de la
+  // collection source (stable) et on va chercher directement dans la library
+  // CIBLE la collection de meme nom, exactement comme pour variables/composants.
+  if (!targetLibraryName) return 0;
 
-  // Diagnostic inconditionnel : on liste les nodes portant un override de
-  // mode explicite AVANT le early-return, pour savoir si le probleme vient
-  // du remap (collectionMap vide) ou du fait que l'override n'existe meme
-  // pas la ou on l'attend.
-  const nodesWithExplicit = allNodes.filter((n) => {
-    const e = (n as any).explicitVariableModes as Record<string, string> | undefined;
-    return e && Object.keys(e).length > 0;
-  });
-  console.log(`[BSL] ${nodesWithExplicit.length} node(s) in scope carry an explicitVariableModes override`);
-  for (const n of nodesWithExplicit.slice(0, 20)) {
-    console.log(`[BSL]   node "${n.name}" (${n.type}) explicitVariableModes = ${JSON.stringify((n as any).explicitVariableModes)}`);
+  const byCollectionId = new Map<string, { node: SceneNode; modeId: string }[]>();
+  for (const node of allNodes) {
+    const anyNode = node as any;
+    const explicit = anyNode.explicitVariableModes as Record<string, string> | undefined;
+    if (!explicit) continue;
+    for (const [colId, modeId] of Object.entries(explicit)) {
+      const list = byCollectionId.get(colId) ?? [];
+      list.push({ node, modeId });
+      byCollectionId.set(colId, list);
+    }
   }
+  console.log(`[BSL] remapExplicitVariableModes: ${byCollectionId.size} distinct collection id(s) carry explicit mode overrides in scope`);
+  if (byCollectionId.size === 0) return 0;
 
-  if (collectionMap.size === 0) {
-    console.log(
-      "[BSL] collectionMap is empty — no variable was actually rebound during this run, so there is nothing to remap. This means the variable that drives this node's fill was never matched in the variables phase above (check the [BSL] resolveTargetVariable logs, or the unmatched list in the plugin panel).",
+  let targetLibCollections: { key: string; name: string; libraryName: string }[] = [];
+  try {
+    targetLibCollections = (await figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync()).filter(
+      (c) => c.libraryName === targetLibraryName,
     );
+  } catch (e) {
+    console.log(`[BSL] remapExplicitVariableModes: could not list target library collections: ${e}`);
     return 0;
   }
+  console.log(
+    `[BSL] target library "${targetLibraryName}" has ${targetLibCollections.length} collection(s): ${targetLibCollections.map((c) => c.name).join(", ")}`,
+  );
 
-  const collectionCache = new Map<string, VariableCollection | null>();
-  async function getCollection(id: string): Promise<VariableCollection | null> {
-    if (collectionCache.has(id)) return collectionCache.get(id)!;
-    let col: VariableCollection | null = null;
+  let remapped = 0;
+  for (const [colId, entries] of byCollectionId.entries()) {
+    let srcCol: VariableCollection | null;
     try {
-      col = await figma.variables.getVariableCollectionByIdAsync(id);
+      srcCol = await figma.variables.getVariableCollectionByIdAsync(colId);
     } catch {
-      col = null;
+      srcCol = null;
     }
-    collectionCache.set(id, col);
-    return col;
-  }
-
-  const modeIdMap = new Map<string, string>();
-  console.log(`[BSL] remapExplicitVariableModes: ${collectionMap.size} collection pair(s) to check`);
-  for (const [srcColId, tgtColId] of collectionMap.entries()) {
-    const srcCol = await getCollection(srcColId);
-    const tgtCol = await getCollection(tgtColId);
-    if (!srcCol || !tgtCol) {
-      console.log(`[BSL]   pair ${srcColId} -> ${tgtColId}: could not load ${!srcCol ? "source" : "target"} collection`);
+    if (!srcCol) {
+      console.log(`[BSL]   collection ${colId}: could not resolve locally, skipped`);
       continue;
     }
+    if (!srcCol.remote) {
+      console.log(`[BSL]   collection "${srcCol.name}" (${colId}) is local (not from a library), skipped`);
+      continue;
+    }
+
+    const targetLibCol = targetLibCollections.find((c) => c.name.trim().toLowerCase() === srcCol!.name.trim().toLowerCase());
+    if (!targetLibCol) {
+      console.log(
+        `[BSL]   collection "${srcCol.name}" (${colId}): no collection with the same name in target library "${targetLibraryName}"`,
+      );
+      continue;
+    }
+
+    // L'API teamLibrary n'expose pas les modes d'une collection distante tant
+    // qu'aucune de ses variables n'a ete importee dans ce fichier : on
+    // importe donc n'importe laquelle de ses variables pour materialiser un
+    // proxy local et pouvoir lire targetCol.modes.
+    let targetVars;
+    try {
+      targetVars = await figma.teamLibrary.getVariablesInLibraryCollectionAsync(targetLibCol.key);
+    } catch (e) {
+      console.log(`[BSL]   could not list variables of target collection "${targetLibCol.name}": ${e}`);
+      continue;
+    }
+    if (targetVars.length === 0) {
+      console.log(`[BSL]   target collection "${targetLibCol.name}" has no variables, cannot materialize modes`);
+      continue;
+    }
+    let anyTargetVar: Variable;
+    try {
+      anyTargetVar = await importVariableCached(targetVars[0].key);
+    } catch (e) {
+      console.log(`[BSL]   could not import a variable from target collection "${targetLibCol.name}": ${e}`);
+      continue;
+    }
+    const tgtCol = await figma.variables.getVariableCollectionByIdAsync(anyTargetVar.variableCollectionId);
+    if (!tgtCol) {
+      console.log(`[BSL]   could not resolve local proxy for target collection "${targetLibCol.name}"`);
+      continue;
+    }
+
     console.log(
-      `[BSL]   pair "${srcCol.name}" (${srcColId}, modes: ${srcCol.modes.map((m) => JSON.stringify(m.name)).join(", ")}) -> "${tgtCol.name}" (${tgtColId}, modes: ${tgtCol.modes.map((m) => JSON.stringify(m.name)).join(", ")})`,
+      `[BSL]   collection "${srcCol.name}" (${colId}, modes: ${srcCol.modes.map((m) => JSON.stringify(m.name)).join(", ")}) -> "${tgtCol.name}" (${tgtCol.id}, modes: ${tgtCol.modes.map((m) => JSON.stringify(m.name)).join(", ")})`,
     );
+
+    const modeIdMap = new Map<string, string>();
     for (const m of srcCol.modes) {
       const match = tgtCol.modes.find((tm) => tm.name.trim().toLowerCase() === m.name.trim().toLowerCase());
       if (match) {
@@ -534,45 +584,24 @@ async function remapExplicitVariableModes(
         console.log(`[BSL]     mode "${m.name}" (${m.modeId}) -> NO MATCH in target collection`);
       }
     }
-  }
 
-  if (modeIdMap.size === 0) {
-    console.log("[BSL] remapExplicitVariableModes: no mode name matched anywhere, nothing to remap");
-    return 0;
-  }
-
-  let remapped = 0;
-  let nodesWithExplicitModes = 0;
-  for (const node of allNodes) {
-    const anyNode = node as any;
-    const explicit = anyNode.explicitVariableModes as Record<string, string> | undefined;
-    if (!explicit || Object.keys(explicit).length === 0) continue;
-    nodesWithExplicitModes++;
-    for (const [colId, modeId] of Object.entries(explicit)) {
-      const targetColId = collectionMap.get(colId);
+    for (const { node, modeId } of entries) {
       const targetModeId = modeIdMap.get(modeId);
-      if (!targetColId || !targetModeId) {
-        console.log(
-          `[BSL]   node "${node.name}" explicit mode on collection ${colId} (mode ${modeId}): ${
-            !targetColId ? "collection not in collectionMap (not swapped here)" : "mode id not in modeIdMap"
-          }`,
-        );
+      if (!targetModeId) {
+        console.log(`[BSL]     node "${node.name}": mode ${modeId} has no name match in target collection, skipped`);
         continue;
       }
-      const targetCol = await getCollection(targetColId);
-      if (!targetCol) continue;
       try {
-        anyNode.setExplicitVariableModeForCollection(targetCol, targetModeId);
+        (node as any).setExplicitVariableModeForCollection(tgtCol, targetModeId);
         remapped++;
-        console.log(`[BSL]   node "${node.name}": mode remapped to "${targetCol.name}" / ${targetModeId}`);
+        console.log(`[BSL]     node "${node.name}": mode remapped to "${tgtCol.name}" / ${targetModeId}`);
       } catch (e) {
-        console.log(`[BSL]   node "${node.name}": setExplicitVariableModeForCollection threw: ${e}`);
+        console.log(`[BSL]     node "${node.name}": setExplicitVariableModeForCollection threw: ${e}`);
       }
     }
   }
-  console.log(
-    `[BSL] remapExplicitVariableModes done: ${nodesWithExplicitModes} node(s) had explicit modes, ${remapped} override(s) actually remapped`,
-  );
+
+  console.log(`[BSL] remapExplicitVariableModes done: ${remapped} override(s) remapped`);
   return remapped;
 }
 
@@ -805,7 +834,7 @@ async function runSwap(msg: Extract<UiToMainMessage, { type: "run-swap" }>) {
           `[BSL] variables phase done: counts.variables=${counts.variables}, collectionMap has ${collectionMap.size} collection pair(s) recorded`,
         );
         post({ type: "log", level: "info", message: "Remapping variable modes…" });
-        const modesRemapped = await remapExplicitVariableModes(allNodes, collectionMap);
+        const modesRemapped = await remapExplicitVariableModes(allNodes, varLibTarget);
         if (modesRemapped > 0) {
           post({
             type: "log",
