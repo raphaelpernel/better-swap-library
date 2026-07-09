@@ -55,6 +55,7 @@ interface VariableCatalog {
 let cancelRequested = false;
 
 figma.showUI(__html__, { width: 460, height: 680, themeColors: true });
+console.log("[BSL] plugin started — if you don't see this line, the console isn't attached to this plugin's process.");
 
 function post(message: MainToUiMessage) {
   figma.ui.postMessage(message);
@@ -304,13 +305,28 @@ async function resolveTargetVariable(
 ): Promise<Variable | null> {
   if (!alias || !alias.id) return null;
   const variable = await figma.variables.getVariableByIdAsync(alias.id);
-  if (!variable || !variable.remote) return null;
-  if (!sourceCat.byKey.has(variable.key)) return null; // pas une variable de la library source
+  if (!variable) {
+    console.log(`[BSL] resolveTargetVariable: node "${nodeName}" — could not load variable for alias id ${alias.id}`);
+    return null;
+  }
+  if (!variable.remote) {
+    console.log(
+      `[BSL] resolveTargetVariable: node "${nodeName}" — variable "${variable.name}" is LOCAL (not remote), skipped. If this is meant to come from the library, it's likely a local alias/token wrapping the library variable rather than the library variable itself.`,
+    );
+    return null;
+  }
+  if (!sourceCat.byKey.has(variable.key)) {
+    console.log(
+      `[BSL] resolveTargetVariable: node "${nodeName}" — variable "${variable.name}" (key ${variable.key}) is remote but not found in the SOURCE catalog (wrong library enabled/named, or belongs to a different library than the one configured as source).`,
+    );
+    return null; // pas une variable de la library source
+  }
 
   const fullName = sourceCat.byKey.get(variable.key)!;
   const targetKey = targetCat.byKey.has(variable.key) ? variable.key : targetCat.byName.get(fullName);
 
   if (!targetKey) {
+    console.log(`[BSL] resolveTargetVariable: node "${nodeName}" — "${fullName}" has no match in the TARGET catalog.`);
     unmatched.push({ category: "variables", name: fullName, nodeName });
     return null;
   }
@@ -456,7 +472,27 @@ async function remapExplicitVariableModes(
   allNodes: SceneNode[],
   collectionMap: Map<string, string>,
 ): Promise<number> {
-  if (collectionMap.size === 0) return 0;
+  console.log(`[BSL] remapExplicitVariableModes called: collectionMap has ${collectionMap.size} pair(s)`);
+
+  // Diagnostic inconditionnel : on liste les nodes portant un override de
+  // mode explicite AVANT le early-return, pour savoir si le probleme vient
+  // du remap (collectionMap vide) ou du fait que l'override n'existe meme
+  // pas la ou on l'attend.
+  const nodesWithExplicit = allNodes.filter((n) => {
+    const e = (n as any).explicitVariableModes as Record<string, string> | undefined;
+    return e && Object.keys(e).length > 0;
+  });
+  console.log(`[BSL] ${nodesWithExplicit.length} node(s) in scope carry an explicitVariableModes override`);
+  for (const n of nodesWithExplicit.slice(0, 20)) {
+    console.log(`[BSL]   node "${n.name}" (${n.type}) explicitVariableModes = ${JSON.stringify((n as any).explicitVariableModes)}`);
+  }
+
+  if (collectionMap.size === 0) {
+    console.log(
+      "[BSL] collectionMap is empty — no variable was actually rebound during this run, so there is nothing to remap. This means the variable that drives this node's fill was never matched in the variables phase above (check the [BSL] resolveTargetVariable logs, or the unmatched list in the plugin panel).",
+    );
+    return 0;
+  }
 
   const collectionCache = new Map<string, VariableCollection | null>();
   async function getCollection(id: string): Promise<VariableCollection | null> {
@@ -759,6 +795,9 @@ async function runSwap(msg: Extract<UiToMainMessage, { type: "run-swap" }>) {
       }
 
       if (!cancelRequested) {
+        console.log(
+          `[BSL] variables phase done: counts.variables=${counts.variables}, collectionMap has ${collectionMap.size} collection pair(s) recorded`,
+        );
         post({ type: "log", level: "info", message: "Remapping variable modes…" });
         const modesRemapped = await remapExplicitVariableModes(allNodes, collectionMap);
         if (modesRemapped > 0) {
